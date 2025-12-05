@@ -91,6 +91,11 @@ def upgrade_operator_in_memory(operators_data, char_id, target_phase, target_lev
     return False
 
 
+def clean_data(d):
+    # 过滤掉 'raw_results' 这样包含复杂对象的键
+    return {k: v for k, v in d.items() if k != 'raw_results'}
+
+
 # ==========================================
 # 2. 会话状态初始化
 # ==========================================
@@ -259,11 +264,18 @@ else:
             if os.path.exists(run_ops_path): os.remove(run_ops_path)
             if os.path.exists(run_conf_path): os.remove(run_conf_path)
 
-            # 4. 展示结果
-            st.session_state.final_result_json = json.dumps(final_result, ensure_ascii=False, indent=2)
-            st.session_state.final_eff = \
-            final_result.get('raw_results', [type('obj', (object,), {'total_efficiency': 0})])[
-                0].total_efficiency if 'raw_results' in final_result else 0
+            # 2. 获取效率数值 (必须在清洗前获取，因为对象还在)
+            # 如果 final_result 里有 raw_results，取出第一个对象的 total_efficiency 属性
+            raw_res = final_result.get('raw_results', [])
+            current_efficiency = raw_res[0].total_efficiency if raw_res else 0
+            st.session_state.final_eff = current_efficiency
+
+            # 3. 清洗数据并生成 JSON
+            cleaned_result = clean_data(final_result)
+            st.session_state.final_result_json = json.dumps(cleaned_result, ensure_ascii=False, indent=2)
+            # st.session_state.final_eff = \
+            # final_result.get('raw_results', [type('obj', (object,), {'total_efficiency': 0})])[
+            #     0].total_efficiency if 'raw_results' in final_result else 0
 
             st.balloons()
 

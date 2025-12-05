@@ -35,12 +35,26 @@ def setup_user(order_id, ops_source_path, config_type):
         "243": {
             "layout": "2-4-3",
             "desc": "243 均衡流 (2赤金/2经验)",
-            "product_requirements": {"trading_stations": {"LMD": 2}, "manufacturing_stations": {"Pure Gold": 2, "Battle Record": 2}}
+            "product_requirements": {
+                "trading_stations": {"LMD": 2},
+                "manufacturing_stations": {"Pure Gold": 2, "Battle Record": 2}
+            },
+            "trading_stations_count": 2,
+            "manufacturing_stations_count": 4,
+            "Fiammetta": {"enable": True},
+            "drones": {"enable": True, "order": "pre", "targets": ["LMD", "Pure Gold", "LMD"]}
         },
         "333": {
             "layout": "3-3-3",
             "desc": "333 搓玉流",
-            "product_requirements": {"trading_stations": {"LMD": 3}, "manufacturing_stations": {"Pure Gold": 2, "Battle Record": 1}}
+            "product_requirements": {
+                "trading_stations": {"LMD": 3},
+                "manufacturing_stations": {"Pure Gold": 2, "Battle Record": 1}
+            },
+            "trading_stations_count": 3,
+            "manufacturing_stations_count": 3,
+            "Fiammetta": {"enable": True},
+            "drones": {"enable": True, "order": "pre", "targets": ["LMD", "Pure Gold", "LMD"]}
         }
     }
 
