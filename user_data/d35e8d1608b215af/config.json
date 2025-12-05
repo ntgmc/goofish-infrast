@@ -1,0 +1,27 @@
+{
+  "layout": "3-3-3",
+  "desc": "333 搓玉流",
+  "product_requirements": {
+    "trading_stations": {
+      "LMD": 3
+    },
+    "manufacturing_stations": {
+      "Pure Gold": 2,
+      "Battle Record": 1
+    }
+  },
+  "trading_stations_count": 3,
+  "manufacturing_stations_count": 3,
+  "Fiammetta": {
+    "enable": true
+  },
+  "drones": {
+    "enable": true,
+    "order": "pre",
+    "targets": [
+      "LMD",
+      "Pure Gold",
+      "LMD"
+    ]
+  }
+}
