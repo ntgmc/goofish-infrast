@@ -236,8 +236,7 @@ else:
                 col = cols[idx % 2]
 
                 # --- 核心修改：保持文本一致性 ---
-                # 假设 item['gain'] 是小数 (如 0.05 代表 5%)，这里乘以 100
-                gain_pct = item['gain'] * 100
+                gain_pct = item['gain']
 
                 if item.get('type') == 'bundle':
                     op_names = "+".join([o['name'] for o in item['ops']])
