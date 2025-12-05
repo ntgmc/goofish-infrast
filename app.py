@@ -212,46 +212,46 @@ else:
                 if os.path.exists(temp_ops_path): os.remove(temp_ops_path)
                 if os.path.exists(temp_conf_path): os.remove(temp_conf_path)
 
-    # --- 步骤 2: 交互式练度确认 ---
-    st.markdown("### 1. 练度补全确认")
-    st.info("系统检测到您的部分干员提升练度后可大幅增加效率。**勾选并点击生成后，系统将自动记录您的练度提升。**")
+        # --- 步骤 2: 交互式练度确认 ---
+        st.markdown("### 1. 练度补全确认")
+        st.info("系统检测到您的部分干员提升练度后可大幅增加效率。**勾选并点击生成后，系统将自动记录您的练度提升。**")
 
-    # 用于收集用户勾选的 upgrading items
-    # 注意：我们不能直接在这里修改 user_ops，要在按钮点击后修改
+        # 使用字典来存储用户的勾选状态
+        selected_upgrades_indices = []
 
-    # 容器布局
-    cols = st.columns(2)
+        if not st.session_state.suggestions:
+            st.success("🎉 完美！您当前的练度已达到该布局的理论极限，无需额外提升。")
+        else:
+            # === 核心修改点：Container 开始 ===
+            with st.container(border=True):
+                # 1. 先写提示文字，确保它在框内最上方
+                st.write("👇 **请勾选您已完成（或计划立即完成）的提升：**")
 
-    # 使用字典来存储用户的勾选状态，方便后续处理
-    selected_upgrades_indices = []
+                # 2. 【关键】在 Container 内部定义列，这样列才会包含在边框里
+                cols = st.columns(2)
 
-    if not st.session_state.suggestions:
-        st.success("🎉 完美！您当前的练度已达到该布局的理论极限，无需额外提升。")
-    else:
-        with st.container(border=True):
-            st.write("👇 **请勾选您已完成（或计划立即完成）的提升：**")
+                # 3. 遍历建议生成 Checkbox
+                for idx, item in enumerate(st.session_state.suggestions):
+                    # 轮流使用两列
+                    col = cols[idx % 2]
 
-            # 遍历建议生成 Checkbox
-            for idx, item in enumerate(st.session_state.suggestions):
-                col = cols[idx % 2]
+                    # 计算显示用的百分比
+                    gain_pct = item['gain'] * 100
 
-                # --- 核心修改：保持文本一致性 ---
-                gain_pct = item['gain']
+                    if item.get('type') == 'bundle':
+                        op_names = "+".join([o['name'] for o in item['ops']])
+                        label = f"【组合】{op_names} (效率 +{gain_pct:.1f}%)"
+                        help_txt = "\n".join([f"{o['name']}: 精{o['current']} -> 精{o['target']}" for o in item['ops']])
+                    else:
+                        label = f"【单人】{item['name']} (效率 +{gain_pct:.1f}%)"
+                        help_txt = f"当前: 精{item['current']} -> 目标: 精{item['target']}"
 
-                if item.get('type') == 'bundle':
-                    op_names = "+".join([o['name'] for o in item['ops']])
-                    # 标签格式
-                    label = f"【组合】{op_names} (效率 +{gain_pct:.1f}%)"
-                    # 鼠标悬浮提示
-                    help_txt = "\n".join([f"{o['name']}: 精{o['current']} -> 精{o['target']}" for o in item['ops']])
-                else:
-                    label = f"【单人】{item['name']} (效率 +{gain_pct:.1f}%)"
-                    help_txt = f"当前: 精{item['current']} -> 目标: 精{item['target']}"
-
-                # 渲染 Checkbox
-                s_key = f"suggest_{idx}"
-                if col.checkbox(label, key=s_key, help=help_txt):
-                    selected_upgrades_indices.append(idx)
+                    # 渲染 Checkbox
+                    s_key = f"suggest_{idx}"
+                    # 注意：必须使用 col.checkbox 而不是 st.checkbox
+                    if col.checkbox(label, key=s_key, help=help_txt):
+                        selected_upgrades_indices.append(idx)
+            # === Container 结束 ===
 
     # --- 步骤 3: 生成最终排班 & 保存数据 ---
     st.markdown("### 2. 获取排班表")
