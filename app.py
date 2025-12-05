@@ -212,10 +212,10 @@ else:
                 # 构造显示文本
                 if item.get('type') == 'bundle':
                     op_names = "+".join([o['name'] for o in item['ops']])
-                    label = f"【组合】{op_names} (效率 +{item['gain'] * 100:.1f}%)"
+                    label = f"【组合】{op_names} (效率 +{item['gain']:.1f}%)"
                     help_txt = "\n".join([f"{o['name']}: 精{o['current']} -> 精{o['target']}" for o in item['ops']])
                 else:
-                    label = f"【单人】{item['name']} (效率 +{item['gain'] * 100:.1f}%)"
+                    label = f"【单人】{item['name']} (效率 +{item['gain']:.1f}%)"
                     help_txt = f"当前: 精{item['current']} -> 目标: 精{item['target']}"
 
                 # 渲染 Checkbox
