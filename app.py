@@ -91,7 +91,7 @@ def save_user_data(user_hash, ops_data):
     return False
 
 
-def upgrade_operator_in_memory(operators_data, char_id, char_name, target_phase, target_level):
+def upgrade_operator_in_memory(operators_data, char_id, char_name, target_elite, target_level):
     """
     内存修改干员练度 (强制模式)
     """
@@ -114,10 +114,10 @@ def upgrade_operator_in_memory(operators_data, char_id, char_name, target_phase,
             # === 强制修改 ===
             # 不再判断 if target > current，只要勾选了就强制设为目标值
             # 这样能保证绝对生效
-            op['phase'] = int(target_phase)
+            op['elite'] = int(target_elite)
             op['level'] = max(int(op.get('level', 0)), int(target_level))  # 等级还是取一下大值比较安全，或者直接设为1
 
-            return True, f"已修改: {current_name} -> 精{op['phase']}"
+            return True, f"已修改: {current_name} -> 精{op['elite']}"
 
     return False, f"❌ 未找到干员: {char_name} (ID: {char_id})"
 
