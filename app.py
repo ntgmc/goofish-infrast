@@ -78,6 +78,19 @@ def load_user_data(user_hash):
     return None, None
 
 
+def save_user_data(user_hash, ops_data):
+    """将修改后的干员数据永久保存到磁盘"""
+    base_path = os.path.join("user_data", user_hash)
+    ops_path = os.path.join(base_path, "operators.json")
+
+    # 确保目录存在（防止意外删除）
+    if os.path.exists(base_path):
+        with open(ops_path, 'w', encoding='utf-8') as f:
+            json.dump(ops_data, f, ensure_ascii=False, indent=2)
+        return True
+    return False
+
+
 # 模拟练度提升的函数
 def upgrade_operator_in_memory(operators_data, char_id, target_phase, target_level):
     """在内存中修改干员练度"""
@@ -151,58 +164,66 @@ else:
     # 侧边栏信息
     with st.sidebar:
         st.success(f"已登录")
+        # 截取哈希前6位展示，保护隐私
+        st.caption(f"ID: {st.session_state.user_hash[:6]}...")
         st.caption(f"Config: {st.session_state.user_conf.get('desc', 'Custom')}")
         if st.button("退出登录"):
-            st.session_state.auth_status = False
+            # 清除所有 Session 状态
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
             st.rerun()
 
     st.title("🏭 智能排班生成器")
 
     # --- 步骤 1: 生成建议 (如果不使用缓存，每次进来先算一遍) ---
-    # 为了性能，我们在第一次加载时计算建议
     if not st.session_state.suggestions:
         with st.status("正在分析您的基建潜力...", expanded=True) as status:
             st.write("📥 加载基础数据...")
-            # 保存临时文件供 logic.py 读取 (假设你的库读取文件路径)
+
             temp_ops_path = f"temp_{st.session_state.user_hash}.json"
             temp_conf_path = f"temp_conf_{st.session_state.user_hash}.json"
 
+            # 写入临时文件供 logic.py 读取
             with open(temp_ops_path, "w", encoding='utf-8') as f:
                 json.dump(st.session_state.user_ops, f)
             with open(temp_conf_path, "w", encoding='utf-8') as f:
                 json.dump(st.session_state.user_conf, f)
 
             st.write("🧠 运行差异算法...")
-            # 初始化优化器
-            optimizer = WorkplaceOptimizer("efficiency.json", temp_ops_path, temp_conf_path)
+            try:
+                optimizer = WorkplaceOptimizer("efficiency.json", temp_ops_path, temp_conf_path)
 
-            # 计算当前和极限
-            curr = optimizer.get_optimal_assignments(ignore_elite=False)
-            pot = optimizer.get_optimal_assignments(ignore_elite=True)
+                # 计算当前和极限
+                curr = optimizer.get_optimal_assignments(ignore_elite=False)
+                pot = optimizer.get_optimal_assignments(ignore_elite=True)
 
-            # 获取升级建议
-            upgrades = optimizer.calculate_upgrade_requirements(curr, pot)
-            st.session_state.suggestions = upgrades
+                # 获取升级建议
+                upgrades = optimizer.calculate_upgrade_requirements(curr, pot)
+                st.session_state.suggestions = upgrades
 
-            # 清理
-            if os.path.exists(temp_ops_path): os.remove(temp_ops_path)
-            if os.path.exists(temp_conf_path): os.remove(temp_conf_path)
+                status.update(label="分析完成", state="complete", expanded=False)
 
-            status.update(label="分析完成", state="complete", expanded=False)
+            except Exception as e:
+                status.update(label="❌ 计算出错", state="error")
+                st.error(f"算法错误: {str(e)}")
+                st.stop()
+            finally:
+                # 清理临时文件
+                if os.path.exists(temp_ops_path): os.remove(temp_ops_path)
+                if os.path.exists(temp_conf_path): os.remove(temp_conf_path)
 
     # --- 步骤 2: 交互式练度确认 ---
     st.markdown("### 1. 练度补全确认")
-    st.info(
-        "系统检测到您的部分干员提升练度后可大幅增加效率。如果您已经完成了某些提升（或愿意为了排班去提升），请在下方勾选，系统将基于**勾选后的新练度**生成排班。")
+    st.info("系统检测到您的部分干员提升练度后可大幅增加效率。**勾选并点击生成后，系统将自动记录您的练度提升。**")
 
-    # 将建议转换为复选框
-    # 注意：这里需要处理状态保持，Streamlit 的 checkbox 每次 rerun 会重置，除非绑定 key
+    # 用于收集用户勾选的 upgrading items
+    # 注意：我们不能直接在这里修改 user_ops，要在按钮点击后修改
 
+    # 容器布局
     cols = st.columns(2)
-    has_changes = False
 
-    # 创建一个临时的操作员列表副本用于本次计算
-    temp_working_ops = copy.deepcopy(st.session_state.user_ops)
+    # 使用字典来存储用户的勾选状态，方便后续处理
+    selected_upgrades_indices = []
 
     if not st.session_state.suggestions:
         st.success("🎉 完美！您当前的练度已达到该布局的理论极限，无需额外提升。")
@@ -210,76 +231,107 @@ else:
         with st.container(border=True):
             st.write("👇 **请勾选您已完成（或计划立即完成）的提升：**")
 
+            # 遍历建议生成 Checkbox
             for idx, item in enumerate(st.session_state.suggestions):
-                # 构造唯一的key
-                s_key = f"s_{idx}"
+                col = cols[idx % 2]
 
-                # 构造显示文本
+                # --- 核心修改：保持文本一致性 ---
+                # 假设 item['gain'] 是小数 (如 0.05 代表 5%)，这里乘以 100
+                gain_pct = item['gain'] * 100
+
                 if item.get('type') == 'bundle':
                     op_names = "+".join([o['name'] for o in item['ops']])
-                    label = f"【组合】{op_names} (效率 +{item['gain']:.1f}%)"
+                    # 标签格式
+                    label = f"【组合】{op_names} (效率 +{gain_pct:.1f}%)"
+                    # 鼠标悬浮提示
                     help_txt = "\n".join([f"{o['name']}: 精{o['current']} -> 精{o['target']}" for o in item['ops']])
                 else:
-                    label = f"【单人】{item['name']} (效率 +{item['gain']:.1f}%)"
+                    label = f"【单人】{item['name']} (效率 +{gain_pct:.1f}%)"
                     help_txt = f"当前: 精{item['current']} -> 目标: 精{item['target']}"
 
                 # 渲染 Checkbox
-                # 默认值逻辑：如果之前勾选过，保持勾选
-                is_checked = st.checkbox(label, key=s_key, help=help_txt)
+                s_key = f"suggest_{idx}"
+                if col.checkbox(label, key=s_key, help=help_txt):
+                    selected_upgrades_indices.append(idx)
 
-                if is_checked:
-                    has_changes = True
-                    # 更新 temp_working_ops
-                    if item.get('type') == 'bundle':
-                        for o in item['ops']:
-                            # 注意：这里需要根据你的 logic.py 返回的数据结构来匹配 ID
-                            # 假设 item['ops'] 里包含 id 或者 name
-                            # 实际项目中建议 item 包含 char_id
-                            upgrade_operator_in_memory(temp_working_ops, o.get('id'), o['target'], 1)  # 假设精2 1级
-                    else:
-                        upgrade_operator_in_memory(temp_working_ops, item.get('id'), item['target'], 1)
-
-    # --- 步骤 3: 生成最终排班 ---
+    # --- 步骤 3: 生成最终排班 & 保存数据 ---
     st.markdown("### 2. 获取排班表")
 
     action_col, _ = st.columns([1, 2])
 
-    if action_col.button("🚀 生成最新排班方案", type="primary", use_container_width=True):
+    if action_col.button("🚀 保存练度并生成排班", type="primary", use_container_width=True):
 
-        with st.spinner("正在基于您的选择重新演算..."):
-            # 1. 保存包含了用户勾选练度的临时文件
+        with st.spinner("正在保存练度并重新演算..."):
+
+            # === A. 核心修改：修改内存数据并保存到文件 ===
+
+            # 1. 复制一份当前的基础数据
+            # 注意：我们基于 st.session_state.user_ops (原始数据) 进行修改
+            new_ops_data = copy.deepcopy(st.session_state.user_ops)
+            data_changed = False
+
+            # 2. 应用所有勾选的提升
+            for idx in selected_upgrades_indices:
+                item = st.session_state.suggestions[idx]
+
+                if item.get('type') == 'bundle':
+                    for o in item['ops']:
+                        # 注意：确保 item['ops'] 里有 id 字段，如果没有请检查 logic.py
+                        if upgrade_operator_in_memory(new_ops_data, o.get('id'), o['target'], 1):
+                            data_changed = True
+                else:
+                    if upgrade_operator_in_memory(new_ops_data, item.get('id'), item['target'], 1):
+                        data_changed = True
+
+            # 3. 如果有数据变动，写入硬盘 (Persistent Save)
+            if data_changed:
+                try:
+                    save_user_data(st.session_state.user_hash, new_ops_data)
+                    st.toast("✅ 练度信息已更新并保存！", icon="💾")
+
+                    # 4. 关键：更新 Session State，这样下次计算就基于新数据了
+                    st.session_state.user_ops = new_ops_data
+
+                    # 可选：如果希望下次进来不再显示这些建议，可以清空 suggestions
+                    # 但为了不让页面突然闪动，本次先保留显示，或者可以设为 [] 强制下次重算
+                    # st.session_state.suggestions = []
+                except Exception as e:
+                    st.error(f"保存数据失败: {e}")
+                    st.stop()
+
+            # === B. 进行排班计算 (使用更新后的 new_ops_data) ===
+
             run_ops_path = f"run_ops_{st.session_state.user_hash}.json"
             run_conf_path = f"run_conf_{st.session_state.user_hash}.json"
 
             with open(run_ops_path, "w", encoding='utf-8') as f:
-                json.dump(temp_working_ops, f)
+                json.dump(new_ops_data, f)  # 使用最新的数据
             with open(run_conf_path, "w", encoding='utf-8') as f:
                 json.dump(st.session_state.user_conf, f)
 
-            # 2. 运行计算
+            # 运行计算
             optimizer = WorkplaceOptimizer("efficiency.json", run_ops_path, run_conf_path)
-            final_result = optimizer.get_optimal_assignments(ignore_elite=False)  # 注意这里是 False，因为我们要基于(原始+勾选)的练度算
+            # ignore_elite=False: 此时 new_ops_data 已经是提升后的练度了，所以按实际练度算即可
+            final_result = optimizer.get_optimal_assignments(ignore_elite=False)
 
-            # 3. 清理
+            # === C. 结果处理 ===
+
+            # 清理临时文件
             if os.path.exists(run_ops_path): os.remove(run_ops_path)
             if os.path.exists(run_conf_path): os.remove(run_conf_path)
 
-            # 2. 获取效率数值 (必须在清洗前获取，因为对象还在)
-            # 如果 final_result 里有 raw_results，取出第一个对象的 total_efficiency 属性
+            # 提取效率
             raw_res = final_result.get('raw_results', [])
             current_efficiency = raw_res[0].total_efficiency if raw_res else 0
             st.session_state.final_eff = current_efficiency
 
-            # 3. 清洗数据并生成 JSON
+            # 清洗并生成 JSON
             cleaned_result = clean_data(final_result)
             st.session_state.final_result_json = json.dumps(cleaned_result, ensure_ascii=False, indent=2)
-            # st.session_state.final_eff = \
-            # final_result.get('raw_results', [type('obj', (object,), {'total_efficiency': 0})])[
-            #     0].total_efficiency if 'raw_results' in final_result else 0
 
             st.balloons()
 
-    # 结果展示区
+    # 结果展示区 (保持不变)
     if 'final_result_json' in st.session_state:
         st.markdown("---")
         r_col1, r_col2 = st.columns([1, 1])
@@ -301,7 +353,3 @@ else:
             2. 打开 MAA -> 基建换班。
             3. 选择 "自定义排班" 并导入该文件。
             """)
-
-    # --- 可选：保存偏好 (localStorage 模拟) ---
-    # Streamlit 原生不支持直接存 Cookie，但可以通过 query params 稍微取巧
-    # 或者如果不要求严格，依靠 session state 已经足够用户在不关闭页面的情况下反复调整
