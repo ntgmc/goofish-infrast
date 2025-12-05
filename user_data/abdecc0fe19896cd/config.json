@@ -1,0 +1,13 @@
+{
+  "layout": "3-3-3",
+  "desc": "333 搓玉流",
+  "product_requirements": {
+    "trading": {
+      "LMD": 3
+    },
+    "factory": {
+      "Gold": 2,
+      "Shard": 1
+    }
+  }
+}
