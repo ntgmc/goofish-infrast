@@ -175,80 +175,88 @@ else:
 
     st.title("🏭 智能排班生成器")
 
-    # --- 步骤 1: 生成建议 (如果不使用缓存，每次进来先算一遍) ---
-    if not st.session_state.suggestions:
+    # 初始化分析状态标志位
+    if 'analysis_done' not in st.session_state:
+        st.session_state.analysis_done = False
+
+    # --- 步骤 1: 生成建议 ---
+    # 使用 analysis_done 标记来判断，防止空结果导致死循环
+    if not st.session_state.analysis_done:
         with st.status("正在分析您的基建潜力...", expanded=True) as status:
             st.write("📥 加载基础数据...")
 
             temp_ops_path = f"temp_{st.session_state.user_hash}.json"
             temp_conf_path = f"temp_conf_{st.session_state.user_hash}.json"
 
-            # 写入临时文件供 logic.py 读取
-            with open(temp_ops_path, "w", encoding='utf-8') as f:
-                json.dump(st.session_state.user_ops, f)
-            with open(temp_conf_path, "w", encoding='utf-8') as f:
-                json.dump(st.session_state.user_conf, f)
-
-            st.write("🧠 运行差异算法...")
             try:
+                # 写入临时文件
+                with open(temp_ops_path, "w", encoding='utf-8') as f:
+                    json.dump(st.session_state.user_ops, f)
+                with open(temp_conf_path, "w", encoding='utf-8') as f:
+                    json.dump(st.session_state.user_conf, f)
+
+                st.write("🧠 运行差异算法...")
                 optimizer = WorkplaceOptimizer("efficiency.json", temp_ops_path, temp_conf_path)
 
-                # 计算当前和极限
                 curr = optimizer.get_optimal_assignments(ignore_elite=False)
                 pot = optimizer.get_optimal_assignments(ignore_elite=True)
 
-                # 获取升级建议
                 upgrades = optimizer.calculate_upgrade_requirements(curr, pot)
-                st.session_state.suggestions = upgrades
 
-                status.update(label="分析完成", state="complete", expanded=False)
+                # 更新状态
+                st.session_state.suggestions = upgrades
+                st.session_state.analysis_done = True
+
+                status.update(label="✅ 分析完成！", state="complete", expanded=False)
 
             except Exception as e:
                 status.update(label="❌ 计算出错", state="error")
                 st.error(f"算法错误: {str(e)}")
                 st.stop()
             finally:
-                # 清理临时文件
                 if os.path.exists(temp_ops_path): os.remove(temp_ops_path)
                 if os.path.exists(temp_conf_path): os.remove(temp_conf_path)
 
-        # --- 步骤 2: 交互式练度确认 ---
-        st.markdown("### 1. 练度补全确认")
-        st.info("系统检测到您的部分干员提升练度后可大幅增加效率。**勾选并点击生成后，系统将自动记录您的练度提升。**")
+            # 强制刷新一次，确保下方 UI 立即更新
+            st.rerun()
 
-        # 使用字典来存储用户的勾选状态
-        selected_upgrades_indices = []
+    else:
+        # 分析完成后，显示一个静态的成功提示，避免 UI 突然空了一块
+        st.success("✅ 练度分析已完成", icon="📊")
 
-        if not st.session_state.suggestions:
-            st.success("🎉 完美！您当前的练度已达到该布局的理论极限，无需额外提升。")
-        else:
-            # === 核心修改点：Container 开始 ===
-            with st.container(border=True):
-                # 1. 先写提示文字，确保它在框内最上方
-                st.write("👇 **请勾选您已完成（或计划立即完成）的提升：**")
+    # --- 步骤 2: 交互式练度确认 ---
+    st.markdown("### 1. 练度补全确认")
+    st.info("系统检测到您的部分干员提升练度后可大幅增加效率。**勾选并点击生成后，系统将自动记录您的练度提升。**")
 
-                # 2. 【关键】在 Container 内部定义列，这样列才会包含在边框里
-                cols = st.columns(2)
+    # 使用字典来存储用户的勾选状态
+    selected_upgrades_indices = []
 
-                # 3. 遍历建议生成 Checkbox
-                for idx, item in enumerate(st.session_state.suggestions):
-                    # 轮流使用两列
-                    col = cols[idx % 2]
+    if not st.session_state.suggestions:
+        st.success("🎉 完美！您当前的练度已达到该布局的理论极限，无需额外提升。")
+    else:
+        # === 修复布局样式问题 ===
+        with st.container(border=True):
+            st.write("👇 **请勾选您已完成（或计划立即完成）的提升：**")
 
-                    if item.get('type') == 'bundle':
-                        op_names = "+".join([o['name'] for o in item['ops']])
-                        label = f"【组合】{op_names} (效率 +{item['gain']:.1f}%)"
-                        help_txt = "\n".join([f"{o['name']}: 精{o['current']} -> 精{o['target']}" for o in item['ops']])
-                    else:
-                        label = f"【单人】{item['name']} (效率 +{item['gain']:.1f}%)"
-                        help_txt = f"当前: 精{item['current']} -> 目标: 精{item['target']}"
+            # 将列定义放在 Container 内部
+            cols = st.columns(2)
 
-                    # 渲染 Checkbox
-                    s_key = f"suggest_{idx}"
-                    # 注意：必须使用 col.checkbox 而不是 st.checkbox
-                    if col.checkbox(label, key=s_key, help=help_txt):
-                        selected_upgrades_indices.append(idx)
-            # === Container 结束 ===
+            for idx, item in enumerate(st.session_state.suggestions):
+                col = cols[idx % 2]
+
+                gain_pct = item['gain'] * 100
+
+                if item.get('type') == 'bundle':
+                    op_names = "+".join([o['name'] for o in item['ops']])
+                    label = f"【组合】{op_names} (效率 +{gain_pct:.1f}%)"
+                    help_txt = "\n".join([f"{o['name']}: 精{o['current']} -> 精{o['target']}" for o in item['ops']])
+                else:
+                    label = f"【单人】{item['name']} (效率 +{gain_pct:.1f}%)"
+                    help_txt = f"当前: 精{item['current']} -> 目标: 精{item['target']}"
+
+                s_key = f"suggest_{idx}"
+                if col.checkbox(label, key=s_key, help=help_txt):
+                    selected_upgrades_indices.append(idx)
 
     # --- 步骤 3: 生成最终排班 & 保存数据 ---
     st.markdown("### 2. 获取排班表")
