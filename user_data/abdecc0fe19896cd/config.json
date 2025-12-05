@@ -9,5 +9,19 @@
       "Pure Gold": 2,
       "Battle Record": 1
     }
+  },
+  "trading_stations_count": 3,
+  "manufacturing_stations_count": 3,
+  "Fiammetta": {
+    "enable": true
+  },
+  "drones": {
+    "enable": true,
+    "order": "pre",
+    "targets": [
+      "LMD",
+      "Pure Gold",
+      "LMD"
+    ]
   }
 }
