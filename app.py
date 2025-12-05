@@ -91,33 +91,35 @@ def save_user_data(user_hash, ops_data):
     return False
 
 
-# 模拟练度提升的函数
 def upgrade_operator_in_memory(operators_data, char_id, char_name, target_phase, target_level):
     """
-    在内存中修改干员练度
-    增加双重校验：优先匹配 ID，如果 ID 没匹配上，尝试匹配 Name
+    内存修改干员练度 (强制模式)
     """
-    found = False
+    # 转换为字符串进行对比，防止一个是 int 一个是 string 导致匹配失败
+    target_id_str = str(char_id)
+
     for op in operators_data:
-        # 1. 尝试匹配 ID (MAA 导出通常是 char_xxx_name)
-        id_match = str(op.get('id')) == str(char_id)
-        # 2. 尝试匹配 名称 (中文名)
-        name_match = op.get('name') == char_name
+        # 获取当前干员的 ID 和 Name
+        current_id_str = str(op.get('id', ''))
+        current_name = op.get('name', '')
 
-        if id_match or name_match:
-            # 获取当前练度
-            curr_phase = op.get('phase', 0)
-            curr_level = op.get('level', 0)
+        # 匹配逻辑：优先匹配 ID，ID 对不上尝试匹配 Name
+        match = False
+        if current_id_str and current_id_str == target_id_str:
+            match = True
+        elif current_name and current_name == char_name:
+            match = True
 
-            # 只有当目标练度更高时才修改
-            if target_phase > curr_phase or (target_phase == curr_phase and target_level > curr_level):
-                op['phase'] = max(curr_phase, target_phase)
-                op['level'] = max(curr_level, target_level)
-                return True, f"已升级: {op['name']} (精{op['phase']})"
-            else:
-                return True, f"未修改: {op['name']} 练度已高于目标"
+        if match:
+            # === 强制修改 ===
+            # 不再判断 if target > current，只要勾选了就强制设为目标值
+            # 这样能保证绝对生效
+            op['phase'] = int(target_phase)
+            op['level'] = max(int(op.get('level', 0)), int(target_level))  # 等级还是取一下大值比较安全，或者直接设为1
 
-    return False, f"未找到干员: {char_name} (ID: {char_id})"
+            return True, f"已修改: {current_name} -> 精{op['phase']}"
+
+    return False, f"❌ 未找到干员: {char_name} (ID: {char_id})"
 
 
 def clean_data(d):
@@ -244,31 +246,35 @@ else:
         st.markdown("### 1. 练度补全确认")
         st.info("系统检测到您的部分干员提升练度后可大幅增加效率。**勾选并点击生成后，系统将自动记录您的练度提升。**")
 
-        # 存储用户勾选的索引
         selected_upgrades_indices = []
 
         if not st.session_state.suggestions:
             st.success("🎉 完美！您当前的练度已达到该布局的理论极限，无需额外提升。")
         else:
-            # === 修复布局：Container 包裹 Columns ===
             with st.container(border=True):
                 st.write("👇 **请勾选您已完成（或计划立即完成）的提升：**")
-                cols = st.columns(2)  # 列定义在内部
+                cols = st.columns(2)
 
                 for idx, item in enumerate(st.session_state.suggestions):
                     col = cols[idx % 2]
 
-                    # 构造显示文本
+                    # === 修改点：去掉 * 100 ===
+                    # 直接使用原始数值，或者根据你的 logic.py 输出决定
+                    # 如果 item['gain'] 本来就是 0.05 (5%)，不乘100显示就是 0.05%
+                    # 如果 item['gain'] 本来就是 5 (5%)，那就不需要乘
+                    # 按照你刚才的要求，这里不再乘 100，直接显示 item['gain']
+                    gain_val = item['gain']
+
                     if item.get('type') == 'bundle':
                         op_names = "+".join([o['name'] for o in item['ops']])
-                        label = f"【组合】{op_names} (效率 +{item['gain']:.1f}%)"
+                        # 使用 :.2f 控制小数位数，你可以根据实际数据调整
+                        label = f"【组合】{op_names} (效率 +{gain_val:.2f}%)"
                         help_txt = "\n".join([f"{o['name']}: 精{o['current']} -> 精{o['target']}" for o in item['ops']])
                     else:
-                        label = f"【单人】{item['name']} (效率 +{item['gain']:.1f}%)"
+                        label = f"【单人】{item['name']} (效率 +{gain_val:.2f}%)"
                         help_txt = f"当前: 精{item['current']} -> 目标: 精{item['target']}"
 
                     s_key = f"suggest_{idx}"
-                    # 渲染复选框
                     if col.checkbox(label, key=s_key, help=help_txt):
                         selected_upgrades_indices.append(idx)
 
@@ -279,114 +285,110 @@ else:
 
         if action_col.button("🚀 保存练度并生成排班", type="primary", use_container_width=True):
 
+            # 即使没勾选也允许运行，方便用户生成当前练度的表
             if not selected_upgrades_indices:
-                st.warning("⚠️ 您没有勾选任何提升建议，将按当前练度直接计算。")
-                # 即使没勾选，也往下走进行计算
+                st.info("ℹ️ 未勾选任何提升，将按当前练度生成。")
 
             with st.spinner("正在写入数据并重新演算..."):
 
-                # === A. 修改数据 ===
+                # === A. 核心数据修改 ===
 
-                # 1. 深拷贝当前数据
+                # 1. 复制一份当前的原始数据
+                # 这里的 user_ops 是从 operators.json 读出来的原始列表
                 new_ops_data = copy.deepcopy(st.session_state.user_ops)
-                modified_count = 0
-                logs = []
+                modified_log = []
 
-                # 2. 遍历勾选，应用修改
+                # 2. 遍历勾选，强制应用修改
                 for idx in selected_upgrades_indices:
                     item = st.session_state.suggestions[idx]
 
-                    # 处理组合包
                     if item.get('type') == 'bundle':
                         for o in item['ops']:
-                            # 传入 ID 和 Name 进行双重匹配
                             success, msg = upgrade_operator_in_memory(
-                                new_ops_data,
-                                o.get('id'),
-                                o.get('name'),
-                                o['target'],
-                                1  # 默认设为1级
+                                new_ops_data, o.get('id'), o.get('name'), o['target'], 1
                             )
-                            if success: modified_count += 1
-                            logs.append(msg)
-                    # 处理单人
+                            if success: modified_log.append(msg)
                     else:
                         success, msg = upgrade_operator_in_memory(
-                            new_ops_data,
-                            item.get('id'),
-                            item.get('name'),
-                            item['target'],
-                            1
+                            new_ops_data, item.get('id'), item.get('name'), item['target'], 1
                         )
-                        if success: modified_count += 1
-                        logs.append(msg)
+                        if success: modified_log.append(msg)
 
-                # 3. 输出调试日志 (可选，让你知道发生了什么)
-                if logs:
-                    print("Upgrade Logs:", logs)  # 在后台打印
+                # 3. 调试反馈 (如果修改失败，这里能看出来)
+                if len(modified_log) > 0:
+                    # 打印前3条日志给用户看，确信已修改
+                    log_preview = "; ".join(modified_log[:3])
+                    if len(modified_log) > 3: log_preview += "..."
+                    st.toast(f"✅ 已更新数据: {log_preview}", icon="💾")
 
-                # 4. 如果有修改，强制保存到硬盘
-                if modified_count > 0:
+                    # === 关键步骤：保存到硬盘 ===
                     try:
                         save_user_data(st.session_state.user_hash, new_ops_data)
-                        st.toast(f"✅ 成功更新 {modified_count} 名干员的练度！", icon="💾")
 
-                        # 关键：更新 Session 中的数据，确保后续逻辑和刷新后看到的是新的
+                        # === 关键步骤：更新 Session State ===
+                        # 确保当前内存里的数据也是新的
                         st.session_state.user_ops = new_ops_data
 
-                        # 关键：清除分析状态，强制下次刷新时重新分析（因为练度变了，建议也该变了）
+                        # === 关键步骤：清除缓存 ===
+                        # 既然练度变了，旧的建议就无效了。
+                        # 清空 analysis_done 标志位。
+                        # 这样用户如果刷新页面，系统会重新分析，已完成的建议自然就会消失。
                         st.session_state.analysis_done = False
                         st.session_state.suggestions = []
 
                     except Exception as e:
-                        st.error(f"保存失败: {e}")
+                        st.error(f"FATAL: 保存数据失败 - {e}")
                         st.stop()
                 elif selected_upgrades_indices:
-                    st.warning("⚠️ 勾选了选项但未能修改数据，可能是干员ID匹配失败，请联系管理员查看后台日志。")
+                    # 勾选了但没日志，说明匹配全失败了
+                    st.error("⚠️ 错误：无法匹配干员ID。请检查 operators.json 数据格式。")
+                    st.write("Debug - Target IDs:",
+                             [st.session_state.suggestions[i]['name'] for i in selected_upgrades_indices])
 
-                # === B. 重新计算排班 ===
+                # === B. 计算排班 (使用修改后的 new_ops_data) ===
 
-                # 使用 temp_run 前缀，与分析用的文件区分开
                 run_ops_path = f"run_ops_{st.session_state.user_hash}.json"
                 run_conf_path = f"run_conf_{st.session_state.user_hash}.json"
 
-                # 务必使用 new_ops_data (刚才修改过的)
+                # 写入临时文件供算法读取
                 with open(run_ops_path, "w", encoding='utf-8') as f:
-                    json.dump(new_ops_data, f)
+                    json.dump(new_ops_data, f, ensure_ascii=False)
                 with open(run_conf_path, "w", encoding='utf-8') as f:
-                    json.dump(st.session_state.user_conf, f)
+                    json.dump(st.session_state.user_conf, f, ensure_ascii=False)
 
                 try:
-                    # 运行计算 (ignore_elite=False, 因为我们要用实际修改后的练度)
+                    # 调用算法
+                    # ignore_elite=False -> 必须为 False，因为我们要基于 new_ops_data (其中已包含了我们刚才强制修改的精二数据) 来计算
                     optimizer = WorkplaceOptimizer("efficiency.json", run_ops_path, run_conf_path)
                     final_result = optimizer.get_optimal_assignments(ignore_elite=False)
 
-                    # 清理
-                    if os.path.exists(run_ops_path): os.remove(run_ops_path)
-                    if os.path.exists(run_conf_path): os.remove(run_conf_path)
-
-                    # 提取结果
+                    # 提取效率
                     raw_res = final_result.get('raw_results', [])
                     current_efficiency = raw_res[0].total_efficiency if raw_res else 0
                     st.session_state.final_eff = current_efficiency
 
-                    # 清洗数据
+                    # 清洗结果 (去除不可序列化对象)
                     cleaned_result = clean_data(final_result)
                     st.session_state.final_result_json = json.dumps(cleaned_result, ensure_ascii=False, indent=2)
 
-                    # 成功动画
                     st.balloons()
 
                 except Exception as e:
-                    st.error(f"排班计算失败: {str(e)}")
+                    st.error(f"计算过程发生错误: {str(e)}")
+                finally:
+                    # 清理临时文件
+                    if os.path.exists(run_ops_path): os.remove(run_ops_path)
+                    if os.path.exists(run_conf_path): os.remove(run_conf_path)
 
-        # 结果展示区 (保持不变)
+        # 结果展示区
         if 'final_result_json' in st.session_state:
             st.markdown("---")
             r_col1, r_col2 = st.columns([1, 1])
 
             with r_col1:
-                st.metric("预计最终效率", f"{st.session_state.final_eff:.2f}%")
+                # 这里去掉了 delta，因为没有比较基准了
+                st.metric("预计最终效率", f"{st.session_state.final_eff:.2f}")  # 如果本来就是百分比数值，这里不带%符号，看你需求
+
                 st.download_button(
                     label="📥 下载 MAA 排班文件 (JSON)",
                     data=st.session_state.final_result_json,
@@ -397,7 +399,7 @@ else:
 
             with r_col2:
                 st.info("""
-                **说明：**
-                下载的文件已包含您刚才勾选的提升练度。
-                请确保您在游戏中实际提升了这些干员，否则导入 MAA 可能无法正确换班。
-                """)
+                    **操作成功！**
+                    1. 上方文件已包含您勾选的练度提升。
+                    2. **请按 F5 刷新页面**：您会发现刚才勾选的建议已经消失（因为系统已记录您完成了这些提升）。
+                    """)
