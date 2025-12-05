@@ -2,12 +2,12 @@
   "layout": "3-3-3",
   "desc": "333 搓玉流",
   "product_requirements": {
-    "trading": {
+    "trading_stations": {
       "LMD": 3
     },
-    "factory": {
-      "Gold": 2,
-      "Shard": 1
+    "manufacturing_stations": {
+      "Pure Gold": 2,
+      "Battle Record": 1
     }
   }
 }
